@@ -10,7 +10,6 @@ import string
 
 ## for data
 import json
-import pandas as pd
 import numpy as np
 ## for plotting
 import matplotlib.pyplot as plt
@@ -18,6 +17,7 @@ import seaborn as sns
 ## for processing
 import re
 import nltk
+import preprocessor
 ## for bag-of-words
 from sklearn import feature_selection, feature_extraction, metrics, model_selection, naive_bayes, pipeline, manifold, preprocessing
 ## for explainer
@@ -65,10 +65,66 @@ def load_data(n_rows=None):
 #     text_no_doublespace = re.sub('\s+', ' ', text_nopunct).strip()
 #     return text_no_doublespace
 
+def remove_urls(text):
+    preprocessor.set_options('urls')
+    # forming a separate feature for cleaned tweets
+    return preprocessor.clean(text)
 
-def utils_preprocess_text(text, flg_stemm=False, flg_lemm=True, lst_stopwords=None):
-    ## clean (convert to lowercase and remove punctuations and characters and then strip)
-    text = re.sub(r'([^\w\s])^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])', '', str(text).lower().strip())
+
+def remove_emojis(text):
+    preprocessor.set_options('emojis', 'smiles')
+    # forming a separate feature for cleaned tweets
+    return preprocessor.clean(text)
+
+
+def remove_hashtags(text):
+    preprocessor.set_options('hashtags')
+    # forming a separate feature for cleaned tweets
+    return preprocessor.clean(text)
+
+
+def remove_mentions(text):
+    preprocessor.set_options('mentions')
+    # forming a separate feature for cleaned tweets
+    return preprocessor.clean(text)
+
+
+def remove_standard(text):
+    preprocessor.set_options('reserved_words', 'numbers', 'escape_chars')
+    # forming a separate feature for cleaned tweets
+    text = re.sub(r'\+(\d|\.)*', '', text)
+
+    return preprocessor.clean(text)
+
+
+def remove_punctuation(text):
+    text = re.sub('([^\w\s][^\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])', '', text)
+
+    return text
+
+
+def preprocess(text, flg_stemm=False, flg_lemm=True, lst_stopwords=None, flg_remove_mentions=None,
+              flg_remove_emojis=None, flg_remove_hashtags=None, flg_remove_punctuation=None, flg_remove_urls=None):
+
+    text = text.replace('<LH>', '')
+    text = remove_standard(text)
+    text = text.strip()
+    text = text.lower()
+
+    if flg_remove_mentions:
+        text = remove_mentions(text)
+
+    if flg_remove_emojis:
+        text = remove_emojis(text)
+
+    if flg_remove_hashtags:
+        text = remove_hashtags(text)
+
+    if flg_remove_urls:
+        text = remove_urls(text)
+
+    if flg_remove_punctuation:
+        text = remove_punctuation(text)
 
     ## Tokenize (convert from string to list)
     lst_text = text.split()
@@ -92,18 +148,29 @@ def utils_preprocess_text(text, flg_stemm=False, flg_lemm=True, lst_stopwords=No
     return text
 
 
-def preprocess(text, flg_stemm, flg_lemm, stopwords=None):
-    text = text.str.replace('<LH>', '')
-    text = text.apply(emoji.get_emoji_regexp().split).apply(" ".join)
+# def preprocess(text, flg_stemm, flg_lemm, stopwords=None):
+#     text = text.str.replace('<LH>', '')
+#     # text = text.apply(emoji.get_emoji_regexp().split).apply(" ".join)
+#
+#
+#     # return text.apply(
+#     #     lambda x: utils_preprocess_text(
+#     #         x,
+#     #         flg_stemm=flg_stemm,
+#     #         flg_lemm=flg_lemm,
+#     #         lst_stopwords=stopwords
+#     #     )
+#     # )
 
-    return text.apply(
-        lambda x: utils_preprocess_text(
-            x,
-            flg_stemm=flg_stemm,
-            flg_lemm=flg_lemm,
-            lst_stopwords=stopwords
-        )
-    )
+
+def generate_tags(df, hashtag_threshold = 200):
+    mlb = preprocessing.MultiLabelBinarizer(sparse_output=True)
+    add_tag = np.vectorize(lambda x: f"hashtag_{x}")
+    hashtags = pd.DataFrame(mlb.fit_transform(df.hashtags).toarray(), columns=add_tag(mlb.classes_))
+    hashtag_freq = hashtags.sum(axis=0).sort_values(ascending=False)
+    hashtags = hashtags.filter(hashtag_freq.iloc[:hashtag_threshold].index)
+
+    return hashtags
 
 
 def split_dataset(df):
@@ -142,13 +209,13 @@ def select_features(X_train, y_train, vect, n_features, ngram_range, threshold):
         dtf_features = dtf_features[dtf_features["score"] > p_value_limit]
     X_names = dtf_features["feature"].unique().tolist()
 
-    # for cat in np.unique(y_train):
-    #     print("# {}:".format(cat))
-    #     print("  . selected features:",
-    #           len(dtf_features[dtf_features["emotion"] == cat]))
-    #     print("  . top features:", ",".join(
-    #         dtf_features[dtf_features["emotion"] == cat]["feature"].values[:10]))
-    #     print(" ")
+    for cat in np.unique(y_train):
+        print("# {}:".format(cat))
+        print("  . selected features:",
+              len(dtf_features[dtf_features["emotion"] == cat]))
+        print("  . top features:", ",".join(
+            dtf_features[dtf_features["emotion"] == cat]["feature"].values[:10]))
+        print(" ")
 
     vectorizer = vect(vocabulary=X_names)
     vectorizer.fit(X_train)
