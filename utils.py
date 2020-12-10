@@ -1,35 +1,17 @@
 import pandas as pd
-import json
-import functools
 import emoji
-import functools
-import operator
 import re
-import nltk
-import string
-
-## for data
 import json
 import numpy as np
-## for plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
-## for processing
-import re
 import nltk
 import preprocessor
-## for bag-of-words
-from sklearn import feature_selection, feature_extraction, metrics, model_selection, naive_bayes, pipeline, manifold, preprocessing
-## for explainer
-from lime import lime_text
-## for word embedding
-import gensim
-import gensim.downloader as gensim_api
-## for deep learning
-from tensorflow.keras import models, layers, preprocessing as kprocessing
-from tensorflow.keras import backend as K
-## for bert language model
-import transformers
+from imblearn.under_sampling import RandomUnderSampler
+from sklearn import feature_selection, metrics, model_selection, preprocessing
+
+lemmatizer = nltk.stem.WordNetLemmatizer()
+w_tokenizer = nltk.tokenize.TweetTokenizer()
 
 
 def load_data(n_rows=None):
@@ -54,61 +36,49 @@ def load_data(n_rows=None):
 
     return tweet_df
 
-
-# def clean_text(text):
-#     # remove numbers
-#     text_nonum = re.sub(r'\d+', '', text)
-#     # remove punctuations and convert characters to lower case
-#     text_nopunct = "".join([char.lower() for char in text_nonum if char not in string.punctuation])
-#     # substitute multiple whitespace with single whitespace
-#     # Also, removes leading and trailing whitespaces
-#     text_no_doublespace = re.sub('\s+', ' ', text_nopunct).strip()
-#     return text_no_doublespace
-
 def remove_urls(text):
     preprocessor.set_options('urls')
-    # forming a separate feature for cleaned tweets
     return preprocessor.clean(text)
 
 
 def remove_emojis(text):
     preprocessor.set_options('emojis', 'smiles')
-    # forming a separate feature for cleaned tweets
     return preprocessor.clean(text)
 
 
 def remove_hashtags(text):
     preprocessor.set_options('hashtags')
-    # forming a separate feature for cleaned tweets
     return preprocessor.clean(text)
 
 
 def remove_mentions(text):
     preprocessor.set_options('mentions')
-    # forming a separate feature for cleaned tweets
     return preprocessor.clean(text)
 
 
 def remove_standard(text):
     preprocessor.set_options('reserved_words', 'numbers', 'escape_chars')
-    # forming a separate feature for cleaned tweets
-    text = re.sub(r'\+(\d|\.)*', '', text)
+    text = re.sub(r'\+(\d|\.)*', ' ', text)
 
     return preprocessor.clean(text)
 
 
 def remove_punctuation(text):
-    text = re.sub('([^\w\s][^\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])', '', text)
+    text = re.sub(r'([^\w\s])^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])', ' ', text)
 
     return text
 
 
-def preprocess(text, flg_stemm=False, flg_lemm=True, lst_stopwords=None, flg_remove_mentions=None,
+def lemmatize_text(text):
+    return [(lemmatizer.lemmatize(w)) for w in w_tokenizer.tokenize((text))]
+
+
+def preprocess(text, flg_lemm=True, lst_stopwords=None, flg_remove_mentions=None,
               flg_remove_emojis=None, flg_remove_hashtags=None, flg_remove_punctuation=None, flg_remove_urls=None):
 
-    text = text.replace('<LH>', '')
+    text = text.replace('<LH>', ' ')
     text = remove_standard(text)
-    text = text.strip()
+    text = " ".join(emoji.get_emoji_regexp().split(text))
     text = text.lower()
 
     if flg_remove_mentions:
@@ -126,41 +96,19 @@ def preprocess(text, flg_stemm=False, flg_lemm=True, lst_stopwords=None, flg_rem
     if flg_remove_punctuation:
         text = remove_punctuation(text)
 
-    ## Tokenize (convert from string to list)
-    lst_text = text.split()
-    ## remove Stopwords
+    text = text.strip()
+
     if lst_stopwords is not None:
+        lst_text = text.split()
         lst_text = [word for word in lst_text if word not in
                     lst_stopwords]
+        text = " ".join(lst_text)
 
-    ## Stemming (remove -ing, -ly, ...)
-    if flg_stemm == True:
-        ps = nltk.stem.porter.PorterStemmer()
-        lst_text = [ps.stem(word) for word in lst_text]
+    if flg_lemm:
+        text = lemmatize_text(text)
+        text = " ".join(text)
 
-    ## Lemmatisation (convert the word into root word)
-    if flg_lemm == True:
-        lem = nltk.stem.wordnet.WordNetLemmatizer()
-        lst_text = [lem.lemmatize(word) for word in lst_text]
-
-    ## back to string from list
-    text = " ".join(lst_text)
     return text
-
-
-# def preprocess(text, flg_stemm, flg_lemm, stopwords=None):
-#     text = text.str.replace('<LH>', '')
-#     # text = text.apply(emoji.get_emoji_regexp().split).apply(" ".join)
-#
-#
-#     # return text.apply(
-#     #     lambda x: utils_preprocess_text(
-#     #         x,
-#     #         flg_stemm=flg_stemm,
-#     #         flg_lemm=flg_lemm,
-#     #         lst_stopwords=stopwords
-#     #     )
-#     # )
 
 
 def generate_tags(df, hashtag_threshold = 200):
@@ -175,17 +123,16 @@ def generate_tags(df, hashtag_threshold = 200):
 
 def split_dataset(df):
     ## split dataset
-    train, test = model_selection.train_test_split(df[df['identification'] == 'train'], test_size=0.3)
-    ## get target
-    y_train = train["emotion"].values
-    y_test = test["emotion"].values
+    train, test = model_selection.train_test_split(df[df['identification'] == 'train'], test_size=0.1)
 
-    X_train = train['clean_text']
-    X_test = test['clean_text']
+    print(f"Train: {train.shape}, test: {test.shape}")
 
-    print(f"Train: {X_train.shape}, test: {X_test.shape}")
+    return train, test
 
-    return X_train, X_test, y_train, y_test
+
+def undersample(X, y):
+    rus = RandomUnderSampler(random_state=0)
+    return rus.fit_resample(X, y)
 
 
 def select_features(X_train, y_train, vect, n_features, ngram_range, threshold):
@@ -197,30 +144,31 @@ def select_features(X_train, y_train, vect, n_features, ngram_range, threshold):
 
     print(f'Whole vocabolary {len(dic_vocabulary)}')
 
-    X_names = vectorizer.get_feature_names()
-    p_value_limit = threshold
-    dtf_features = pd.DataFrame()
-    for cat in np.unique(y_train):
-        chi2, p = feature_selection.chi2(X_train_vect, y_train == cat)
-        dtf_features = dtf_features.append(pd.DataFrame(
-            {"feature": X_names, "score": 1 - p, "emotion": cat}))
-        dtf_features = dtf_features.sort_values(["emotion", "score"],
-                                                ascending=[True, False])
-        dtf_features = dtf_features[dtf_features["score"] > p_value_limit]
-    X_names = dtf_features["feature"].unique().tolist()
+    if threshold > 0:
+        X_names = vectorizer.get_feature_names()
+        p_value_limit = threshold
+        dtf_features = pd.DataFrame()
+        for cat in np.unique(y_train):
+            chi2, p = feature_selection.chi2(X_train_vect, y_train == cat)
+            dtf_features = dtf_features.append(pd.DataFrame(
+                {"feature": X_names, "score": 1 - p, "emotion": cat}))
+            dtf_features = dtf_features.sort_values(["emotion", "score"],
+                                                    ascending=[True, False])
+            dtf_features = dtf_features[dtf_features["score"] > p_value_limit]
+        X_names = dtf_features["feature"].unique().tolist()
 
-    for cat in np.unique(y_train):
-        print("# {}:".format(cat))
-        print("  . selected features:",
-              len(dtf_features[dtf_features["emotion"] == cat]))
-        print("  . top features:", ",".join(
-            dtf_features[dtf_features["emotion"] == cat]["feature"].values[:10]))
-        print(" ")
+        for cat in np.unique(y_train):
+            print("# {}:".format(cat))
+            print("  . selected features:",
+                  len(dtf_features[dtf_features["emotion"] == cat]))
+            print("  . top features:", ",".join(
+                dtf_features[dtf_features["emotion"] == cat]["feature"].values[:10]))
+            print(" ")
 
-    vectorizer = vect(vocabulary=X_names)
-    vectorizer.fit(X_train)
-    X_train_vect = vectorizer.transform(X_train)
-    dic_vocabulary = vectorizer.vocabulary_
+        vectorizer = vect(vocabulary=X_names)
+        vectorizer.fit(X_train)
+        X_train_vect = vectorizer.transform(X_train)
+        dic_vocabulary = vectorizer.vocabulary_
 
     print(f'Reduced vocabolary {len(dic_vocabulary)}')
 
@@ -232,10 +180,10 @@ def evaluate(y_test, predicted, predicted_prob):
     y_test_array = pd.get_dummies(y_test, drop_first=False).values
 
     ## Accuracy, Precision, Recall
-    accuracy = metrics.accuracy_score(y_test, predicted)
+    f1_score = metrics.f1_score(y_test, predicted, average='weighted')
     auc = metrics.roc_auc_score(y_test, predicted_prob,
                                 multi_class="ovr")
-    print("Accuracy:", round(accuracy, 2))
+    print("F1-score:", round(f1_score, 2))
     print("Auc:", round(auc, 2))
     print("Detail:")
     print(metrics.classification_report(y_test, predicted))
@@ -279,3 +227,34 @@ def evaluate(y_test, predicted, predicted_prob):
     ax[1].legend(loc="best")
     ax[1].grid(True)
     plt.show()
+
+
+def clean_text(df):
+    # remove URL
+    df['text'] = df['text'].str.replace(r'<LH>', r'')
+    df['text'] = df['text'].str.replace(r'http(\S)+', r'')
+    df['text'] = df['text'].str.replace(r'http ...', r'')
+    df['text'] = df['text'].str.replace(r'http', r'')
+    df[df['text'].str.contains(r'http')]
+    # remove RT, @
+    df['text'] = df['text'].str.replace(r'(RT|rt)[ ]*@[ ]*[\S]+', r'')
+    df[df['text'].str.contains(r'RT[ ]?@')]
+    df['text'] = df['text'].str.replace(r'@[\S]+', r'')
+    # remove non-ascii words and character
+    df['text'] = df['text'].str.replace(r'_[\S]?', r'')
+    # remove &, < and >
+    df['text'] = df['text'].str.replace(r'&amp;?', r'and')
+    df['text'] = df['text'].str.replace(r'&lt;', r'<')
+    df['text'] = df['text'].str.replace(r'&gt;', r'>')
+    # remove extra space
+    df['text'] = df['text'].str.replace(r'[ ]{2, }', r' ')
+    # insert space between punctuation marks
+    df['text'] = df['text'].str.replace(r'([\w\d]+)([^\w\d ]+)', r'\1 \2')
+    df['text'] = df['text'].str.replace(r'([^\w\d ]+)([\w\d]+)', r'\1 \2')
+    # insert space between emojis
+    #     df['text'] = df['text'].str.replace(emoji.get_emoji_regexp(), r'\1 ')
+    # lower case and strip white spaces at both ends
+    df['text'] = df['text'].str.lower()
+    df['text'] = df['text'].str.strip()
+
+    return df
